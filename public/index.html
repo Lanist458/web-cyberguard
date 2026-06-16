@@ -1,1 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web CyberGuard</title>
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+      .card { max-width: 820px; padding: 16px; border: 1px solid #ddd; border-radius: 12px; }
+      button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+      .row { display:flex; gap: 12px; align-items:center; flex-wrap: wrap; }
+      .muted { color:#666; }
+      .ok { color: #0a7; }
+      .bad { color: #c00; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #fafafa; padding: 12px; border-radius: 10px; border: 1px solid #eee; }
+      code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    </style>
+  </head>
 
+  <body>
+    <div class="card">
+      <h1>Web CyberGuard</h1>
+      <p class="muted">
+        MVP for Pi App Studio verification: Pi Authentication + backend token validation + session.
+      </p>
+
+      <div class="row">
+        <button id="btnSignIn">Sign in with Pi</button>
+        <button id="btnLogout">Logout</button>
+        <span id="status" class="muted">Loading…</span>
+      </div>
+
+      <h3>Session</h3>
+      <pre id="session">...</pre>
+
+      <h3>Debug</h3>
+      <pre id="debug">...</pre>
+    </div>
+
+    <!-- Pi SDK: Pi Browser typically injects Pi object; this is a safe fallback -->
+    <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
