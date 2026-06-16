@@ -1,1 +1,17 @@
-
+{
+  "name": "web-cyberguard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web CyberGuard - Pi Browser security app (MVP: Pi Authentication + session)",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
