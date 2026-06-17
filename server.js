@@ -18,11 +18,11 @@ function newSessionId() {
 
 function setSessionCookie(res, sid) {
   // Pi App Studio hosting will be HTTPS; secure cookies should work.
-  // SameSite=Lax is generally safest for first-party app usage.
+  // SameSite= "none" is generally safest for first-party app usage.
   res.cookie("wcg_sid", sid, {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite: "none",
     maxAge: 1000 * 60 * 60 * 24 * 7,
     path: "/"
   });
@@ -32,7 +32,7 @@ function clearSessionCookie(res) {
   res.cookie("wcg_sid", "", {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite: "none",
     expires: new Date(0),
     path: "/"
   });
