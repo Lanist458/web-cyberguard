@@ -1,7 +1,7 @@
-// public/main.js (drop-in replacement)
-// Fix: Pi SDK often doesn't like <script type="module"> in some WebView contexts.
-// This version is plain JS (no module), avoids optional chaining, and adds hard diagnostics.
-// REQUIREMENT: await Pi.init(...) before Pi.authenticate(...), use ["username"] scope.
+// public/main.js (replace entirely)
+// Fix: ensure "Sign in with Pi" click ALWAYS attempts auth and logs outcome.
+// Add guard to prevent accidental logout-state debug confusion.
+// Add explicit UI status for Pi SDK presence.
 
 (function () {
   function $(id) { return document.getElementById(id); }
@@ -13,11 +13,8 @@
   var btnLogout = $("btnLogout");
 
   function logDebug(obj) {
-    try {
-      debugEl.textContent = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
-    } catch (e) {
-      debugEl.textContent = String(obj);
-    }
+    try { debugEl.textContent = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2); }
+    catch (e) { debugEl.textContent = String(obj); }
   }
 
   function setStatus(text, cls) {
@@ -25,15 +22,18 @@
     statusEl.className = cls || "muted";
   }
 
-  // Sandbox flag (optional): ?sandbox=true or localStorage wcg_sandbox=true
-  function isSandboxEnabled() {
+  function hasPiSdk() {
+    return !!(window.Pi && typeof window.Pi.init === "function" && typeof window.Pi.authenticate === "function");
+  }
+
+  function sandboxEnabled() {
     try {
       var u = new URL(window.location.href);
       var qs = u.searchParams.get("sandbox");
       if (qs === "true") return true;
       if (qs === "false") return false;
     } catch (e) {}
-    return (localStorage.getItem("wcg_sandbox") === "true");
+    return localStorage.getItem("wcg_sandbox") === "true";
   }
 
   function persistSandboxFromQuery() {
@@ -44,8 +44,6 @@
     } catch (e) {}
   }
 
-  var SANDBOX = isSandboxEnabled();
-
   async function getSession() {
     var r = await fetch("/api/session", { method: "GET" });
     if (!r.ok) return { loggedIn: false };
@@ -55,25 +53,21 @@
   async function renderSession() {
     var s = await getSession();
     sessionEl.textContent = JSON.stringify(s, null, 2);
-    if (s.loggedIn) setStatus("Signed in as " + s.username + (SANDBOX ? " (SANDBOX)" : ""), "ok");
-    else setStatus("Not signed in" + (SANDBOX ? " (SANDBOX)" : ""), "bad");
-  }
-
-  function assertPiAvailable() {
-    if (!window.Pi) throw new Error("Pi SDK not available (window.Pi missing). Open inside Pi Browser.");
-    if (typeof window.Pi.init !== "function") throw new Error("Pi SDK present but Pi.init is not a function.");
-    if (typeof window.Pi.authenticate !== "function") throw new Error("Pi SDK present but Pi.authenticate is not a function.");
+    if (s.loggedIn) setStatus("Signed in as " + s.username, "ok");
+    else setStatus("Not signed in", "bad");
   }
 
   async function authenticateWithPi() {
-    assertPiAvailable();
+    if (!window.Pi) throw new Error("Pi SDK not available (window.Pi missing). Must open inside Pi Browser.");
+    if (typeof window.Pi.init !== "function") throw new Error("Pi SDK present but Pi.init is not a function.");
+    if (typeof window.Pi.authenticate !== "function") throw new Error("Pi SDK present but Pi.authenticate is not a function.");
 
-    // REQUIRED: await Pi.init as Promise
+    var SANDBOX = sandboxEnabled();
+
+    // REQUIRED by Pi App Studio: await Pi.init(...) fully before calling Pi.authenticate(...)
     await window.Pi.init({ version: "2.0", sandbox: SANDBOX });
 
-    // REQUIRED: username scope
     var authResult = await window.Pi.authenticate(["username"], function () { return {}; });
-
     var accessToken = authResult && authResult.accessToken;
     if (!accessToken) throw new Error("Missing accessToken from Pi.authenticate() result");
 
@@ -87,7 +81,6 @@
     try { data = await r.json(); } catch (e) {}
 
     if (!r.ok || !data.ok) throw new Error((data && data.error) ? data.error : "Backend auth failed");
-
     return data;
   }
 
@@ -97,18 +90,22 @@
   }
 
   function wireUi() {
-    if (!btnSignIn) throw new Error("btnSignIn not found in DOM");
-    if (!btnLogout) throw new Error("btnLogout not found in DOM");
-    if (!debugEl || !sessionEl || !statusEl) throw new Error("Required UI elements missing");
-
     btnSignIn.onclick = async function () {
       try {
-        logDebug({ action: "sign-in-click", sandbox: SANDBOX, hasPi: !!window.Pi });
-        await authenticateWithPi();
+        logDebug({
+          action: "sign-in-click",
+          hasPi: !!window.Pi,
+          hasPiSdk: hasPiSdk(),
+          url: window.location.href,
+          sandbox: sandboxEnabled()
+        });
+
+        var result = await authenticateWithPi();
+        logDebug({ ok: true, action: "sign-in-result", result: result });
+
         await renderSession();
-        logDebug({ ok: true, message: "Sign-in OK" });
       } catch (e) {
-        logDebug({ ok: false, error: String(e && e.message ? e.message : e) });
+        logDebug({ ok: false, action: "sign-in-error", error: String(e && e.message ? e.message : e) });
         await renderSession();
       }
     };
@@ -117,49 +114,54 @@
       try {
         logDebug({ action: "logout-click" });
         await logout();
-        logDebug({ ok: true, message: "Logged out" });
+        logDebug({ ok: true, action: "logout-ok" });
       } catch (e) {
-        logDebug({ ok: false, error: String(e && e.message ? e.message : e) });
+        logDebug({ ok: false, action: "logout-error", error: String(e && e.message ? e.message : e) });
       }
     };
   }
 
-  async function autoAuth() {
+  async function onLoad() {
+    persistSandboxFromQuery();
+
+    // Always render session first
+    await renderSession();
+
+    // Show SDK status immediately
+    logDebug({
+      note: "loaded",
+      hasPi: !!window.Pi,
+      hasPiSdk: hasPiSdk(),
+      sandbox: sandboxEnabled(),
+      userAgent: navigator.userAgent
+    });
+
+    // Auto-auth attempt (required), but non-fatal
     try {
-      persistSandboxFromQuery();
-      SANDBOX = isSandboxEnabled();
-
-      logDebug({
-        note: "App loaded",
-        sandbox: SANDBOX,
-        userAgent: navigator.userAgent,
-        hasPi: !!window.Pi
-      });
-
-      await renderSession();
       var s = await getSession();
       if (!s.loggedIn) {
-        // Auto-auth on load (required), but don't block UI
-        logDebug({ note: "Auto-auth starting…", hasPi: !!window.Pi, sandbox: SANDBOX });
+        logDebug({ note: "auto-auth-start", hasPi: !!window.Pi, hasPiSdk: hasPiSdk() });
         await authenticateWithPi();
-        logDebug({ ok: true, note: "Auto-auth success" });
+        logDebug({ note: "auto-auth-ok" });
+        await renderSession();
       }
-      await renderSession();
     } catch (e) {
       logDebug({
-        note: "Auto-auth failed/cancelled. Use Sign in button.",
+        note: "auto-auth-failed-or-cancelled",
         error: String(e && e.message ? e.message : e),
-        hasPi: !!window.Pi
+        hasPi: !!window.Pi,
+        hasPiSdk: hasPiSdk()
       });
-      await renderSession();
     }
   }
 
-  // Start after DOM ready; avoids binding failures in some WebViews
   document.addEventListener("DOMContentLoaded", function () {
     try {
+      if (!btnSignIn || !btnLogout || !debugEl || !sessionEl || !statusEl) {
+        throw new Error("Missing required DOM elements. Check index.html ids.");
+      }
       wireUi();
-      autoAuth();
+      onLoad();
     } catch (e) {
       logDebug({ fatal: true, error: String(e && e.message ? e.message : e) });
     }
