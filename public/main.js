@@ -1,16 +1,36 @@
-// public/main.js (replace entirely)
-// Fix: ensure "Sign in with Pi" click ALWAYS attempts auth and logs outcome.
-// Add guard to prevent accidental logout-state debug confusion.
-// Add explicit UI status for Pi SDK presence.
+// public/main.js
+// Pi Browser authentication client with CSRF token support
 
 (function () {
   function $(id) { return document.getElementById(id); }
 
-  var debugEl = $("debug");
-  var sessionEl = $("session");
-  var statusEl = $("status");
-  var btnSignIn = $("btnSignIn");
-  var btnLogout = $("btnLogout");
+  const debugEl = $("debug");
+  const sessionEl = $("session");
+  const statusEl = $("status");
+  const btnSignIn = $("btnSignIn");
+  const btnLogout = $("btnLogout");
+
+  // --- CSRF token for POST requests ---
+  let csrfToken = "";
+
+  async function fetchCsrfToken() {
+    try {
+      const r = await fetch("/api/csrf-token", { method: "GET" });
+      if (r.ok) {
+        const d = await r.json();
+        csrfToken = d.csrfToken || "";
+        logDebug({ note: "csrf-token-fetched", ok: !!csrfToken });
+      }
+    } catch (e) {
+      logDebug({ note: "csrf-token-failed", error: String(e?.message ?? e) });
+    }
+  }
+
+  function csrfHeaders(extra) {
+    const h = { ...(extra || {}) };
+    if (csrfToken) h["X-CSRF-Token"] = csrfToken;
+    return h;
+  }
 
   function logDebug(obj) {
     try { debugEl.textContent = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2); }
@@ -28,8 +48,8 @@
 
   function sandboxEnabled() {
     try {
-      var u = new URL(window.location.href);
-      var qs = u.searchParams.get("sandbox");
+      const u = new URL(window.location.href);
+      const qs = u.searchParams.get("sandbox");
       if (qs === "true") return true;
       if (qs === "false") return false;
     } catch (e) {}
@@ -38,20 +58,20 @@
 
   function persistSandboxFromQuery() {
     try {
-      var u = new URL(window.location.href);
+      const u = new URL(window.location.href);
       if (u.searchParams.get("sandbox") === "true") localStorage.setItem("wcg_sandbox", "true");
       if (u.searchParams.get("sandbox") === "false") localStorage.setItem("wcg_sandbox", "false");
     } catch (e) {}
   }
 
   async function getSession() {
-    var r = await fetch("/api/session", { method: "GET" });
+    const r = await fetch("/api/session", { method: "GET" });
     if (!r.ok) return { loggedIn: false };
     return await r.json();
   }
 
   async function renderSession() {
-    var s = await getSession();
+    const s = await getSession();
     sessionEl.textContent = JSON.stringify(s, null, 2);
     if (s.loggedIn) setStatus("Signed in as " + s.username, "ok");
     else setStatus("Not signed in", "bad");
@@ -62,22 +82,22 @@
     if (typeof window.Pi.init !== "function") throw new Error("Pi SDK present but Pi.init is not a function.");
     if (typeof window.Pi.authenticate !== "function") throw new Error("Pi SDK present but Pi.authenticate is not a function.");
 
-    var SANDBOX = sandboxEnabled();
+    const SANDBOX = sandboxEnabled();
 
     // REQUIRED by Pi App Studio: await Pi.init(...) fully before calling Pi.authenticate(...)
     await window.Pi.init({ version: "2.0", sandbox: SANDBOX });
 
-    var authResult = await window.Pi.authenticate(["username"], function () { return {}; });
-    var accessToken = authResult && authResult.accessToken;
+    const authResult = await window.Pi.authenticate(["username"], function () { return {}; });
+    const accessToken = authResult && authResult.accessToken;
     if (!accessToken) throw new Error("Missing accessToken from Pi.authenticate() result");
 
-    var r = await fetch("/api/auth/pi", {
+    const r = await fetch("/api/auth/pi", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ accessToken: accessToken })
     });
 
-    var data = {};
+    let data = {};
     try { data = await r.json(); } catch (e) {}
 
     if (!r.ok || !data.ok) throw new Error((data && data.error) ? data.error : "Backend auth failed");
@@ -85,7 +105,10 @@
   }
 
   async function logout() {
-    await fetch("/api/logout", { method: "POST" });
+    await fetch("/api/logout", {
+      method: "POST",
+      headers: csrfHeaders(),
+    });
     await renderSession();
   }
 
@@ -100,7 +123,7 @@
           sandbox: sandboxEnabled()
         });
 
-        var result = await authenticateWithPi();
+        const result = await authenticateWithPi();
         logDebug({ ok: true, action: "sign-in-result", result: result });
 
         await renderSession();
@@ -124,6 +147,9 @@
   async function onLoad() {
     persistSandboxFromQuery();
 
+    // Fetch CSRF token first so subsequent POSTs work
+    await fetchCsrfToken();
+
     // Always render session first
     await renderSession();
 
@@ -138,7 +164,7 @@
 
     // Auto-auth attempt (required), but non-fatal
     try {
-      var s = await getSession();
+      const s = await getSession();
       if (!s.loggedIn) {
         logDebug({ note: "auto-auth-start", hasPi: !!window.Pi, hasPiSdk: hasPiSdk() });
         await authenticateWithPi();
